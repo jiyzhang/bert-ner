@@ -227,7 +227,7 @@ class DataProcessor(object):
         lines = []
         with tf.gfile.Open(sent_file) as f_sent, tf.gfile.Open(tags_file) as f_tags:
             for sent, labels in zip(f_sent, f_tags):
-                lines.append([labels, sent])
+                lines.append([labels.strip(), sent.strip()])
 
         return lines
 
