@@ -57,7 +57,7 @@ flags.DEFINE_bool(
 )
 
 flags.DEFINE_integer(
-    "max_seq_length", 128,
+    "max_seq_length", 256, #128,
     "The maximum total input sequence length after WordPiece tokenization."
 )
 
@@ -394,7 +394,7 @@ def filed_based_convert_examples_to_features(
         ### skip sentences whose length is great than max_seq_len(256)
         if len(example.text) >= 256:
             continue
-            
+
         feature = convert_single_example(ex_index, example, label_map, max_seq_length, tokenizer,mode)
         
         def create_int_feature(values):
