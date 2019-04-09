@@ -391,6 +391,10 @@ def filed_based_convert_examples_to_features(
     for (ex_index, example) in enumerate(examples):
         if ex_index % 5000 == 0:
             tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
+        ### skip sentences whose length is great than max_seq_len(256)
+        if len(example.text) >= 256:
+            continue
+            
         feature = convert_single_example(ex_index, example, label_map, max_seq_length, tokenizer,mode)
         
         def create_int_feature(values):
