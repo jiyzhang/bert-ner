@@ -179,60 +179,77 @@ class DataProcessor(object):
         raise NotImplementedError()
 
     @classmethod
-    def _read_data(cls, input_file):
-        """Reads a BIO data."""
-        """
-        每行一个字，一个lable
-        字 label
-        
-        遇到空行，认为一个句子结束
-        
-        输出:
-        [[O O B-LOC I-LOC B-LOC I-LOC I-LOC,我 爱 北 京 天 安 门],  句子2，句子3.....]
-        """
-        with tf.gfile.Open(input_file) as f:
-            lines = []
-            words = []
-            labels = []
-            for line in f:
-                contends = line.strip()
-                word = line.strip().split(' ')[0]
-                label = line.strip().split(' ')[-1]
-                if contends.startswith("-DOCSTART-"):
-                    words.append('')
-                    continue
-                # if len(contends) == 0 and words[-1] == '。':
-                # blank line, means the end of a sentence, the previous word is "。"q
-                if len(contends) == 0:
-                    l = ' '.join([label for label in labels if len(label) > 0])
-                    w = ' '.join([word for word in words if len(word) > 0])
-                    lines.append([l, w])
-                    words = []
-                    labels = []
-                    continue
-                words.append(word)
-                labels.append(label)
-            return lines
+    # def _read_data(cls, input_file):
+    #     """Reads a BIO data."""
+    #     """
+    #     每行一个字，一个lable
+    #     字 label
+    #
+    #     遇到空行，认为一个句子结束
+    #
+    #     输出:
+    #     [[O O B-LOC I-LOC B-LOC I-LOC I-LOC,我 爱 北 京 天 安 门],  句子2，句子3.....]
+    #     """
+    #     with tf.gfile.Open(input_file) as f:
+    #         lines = []
+    #         words = []
+    #         labels = []
+    #         for line in f:
+    #             contends = line.strip()
+    #             word = line.strip().split(' ')[0]
+    #             label = line.strip().split(' ')[-1]
+    #             if contends.startswith("-DOCSTART-"):
+    #                 words.append('')
+    #                 continue
+    #             # if len(contends) == 0 and words[-1] == '。':
+    #             # blank line, means the end of a sentence, the previous word is "。"q
+    #             if len(contends) == 0:
+    #                 l = ' '.join([label for label in labels if len(label) > 0])
+    #                 w = ' '.join([word for word in words if len(word) > 0])
+    #                 lines.append([l, w])
+    #                 words = []
+    #                 labels = []
+    #                 continue
+    #             words.append(word)
+    #             labels.append(label)
+    #         return lines
+
+    @classmethod
+    def _read_data(cls, data_dir, input_prefix, seperator = '|'):
+        """Reads sents and tags from "input_prefix".words.txt and "input_prefix".tags.txt """
+        """分隔符为 "|" """
+
+        sent_file = os.path.join(data_dir, input_prefix + "words.txt")
+        tags_file = os.path.join(data_dir, input_prefix + "tags.txt" )
+
+        lines = []
+        with tf.gfile.Open(sent_file) as f_sent, tf.gfile.Open(tags_file) as f_tags:
+            for sent, labels in zip(f_sent, f_tags):
+                lines.append([labels, sent])
+
+        return lines
 
 
 class NerProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         return self._create_example(
-            self._read_data(os.path.join(data_dir, "train.txt")), "train"
+            self._read_data(data_dir, "train"), "train"
         )
 
     def get_dev_examples(self, data_dir):
         return self._create_example(
-            self._read_data(os.path.join(data_dir, "dev.txt")), "dev"
+            self._read_data(data_dir, "valid"), "dev"
         )
 
     def get_test_examples(self,data_dir):
         return self._create_example(
-            self._read_data(os.path.join(data_dir, "test.txt")), "test")
+            self._read_data(data_dir, "test"), "test"
+        )
 
 
     def get_labels(self):
-        return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "X","[CLS]","[SEP]"]
+        #return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "X", "[CLS]", "[SEP]"]
+        return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "X", "[CLS]", "[SEP]"]
 
     def _create_example(self, lines, set_type):
         examples = []
@@ -261,7 +278,7 @@ class NerProcessor(DataProcessor):
     
  label_map: label -> i   
 """
-def convert_single_example(ex_index, example, label_map, max_seq_length, tokenizer,mode):
+def convert_single_example(ex_index, example, label_map, max_seq_length, tokenizer,mode, seperator = '|'):
     """Converts a single `InputExample` into a single `InputFeature`. """
 
     if isinstance(example, PaddingInputExample):
@@ -272,8 +289,8 @@ def convert_single_example(ex_index, example, label_map, max_seq_length, tokeniz
             label_ids=[0] * max_seq_length, #label_ids=0,
             is_real_example=False)
 
-    textlist = example.text.split(' ')
-    labellist = example.label.split(' ')
+    textlist = example.text.split(seperator)
+    labellist = example.label.split(seperator)
     tokens = []
     labels = []
     # print(textlist)
@@ -306,6 +323,7 @@ def convert_single_example(ex_index, example, label_map, max_seq_length, tokeniz
     for i, token in enumerate(tokens):
         ntokens.append(token)
         segment_ids.append(0)
+        # convert labels to ids
         label_ids.append(label_map[labels[i]])
     ntokens.append("[SEP]")
     segment_ids.append(0)
@@ -360,6 +378,8 @@ def filed_based_convert_examples_to_features(
     """Convert a set of `InputExample`s to a TFRecord file."""
 
     label_map = {}
+    # {'O': 1, 'B-PER': 2, 'I-PER': 3, 'B-ORG': 4, 'I-ORG': 5, 'X': 6, '[CLS]': 7, '[SEP]': 8}
+    # starting from 1
     for (i, label) in enumerate(label_list,1):
         label_map[label] = i
     with tf.gfile.Open(os.path.join(FLAGS.output_dir, 'label2id.pkl'),'wb') as w:
@@ -475,6 +495,7 @@ def create_model(bert_config, is_training, input_ids, input_mask,
         # return (loss, logits, predict)
         ##########################################################################
         log_probs = tf.nn.log_softmax(logits, axis=-1)
+        # num_labels, 比实际的label数量多1，因为从1开始计数
         one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
         per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
         loss = tf.reduce_sum(per_example_loss)
@@ -553,12 +574,16 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
             def metric_fn(per_example_loss, label_ids, logits, is_real_example):
             # def metric_fn(label_ids, logits):
                 predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
-                print("predictions shape: " + str(predictions.get_shape().as_list()))
-                print("label_ids shape: " + str(label_ids.get_shape().as_list()))
-                print("is_real_example shape: " + str(is_real_example.get_shape().as_list()))
-                precision = tf_metrics.precision(label_ids,predictions,11,[2,3,4,5,6,7], average="macro")
-                recall = tf_metrics.recall(label_ids,predictions,11,[2,3,4,5,6,7], average="macro")
-                f = tf_metrics.f1(label_ids,predictions,11,[2,3,4,5,6,7], average="macro")
+                # print("predictions shape: " + str(predictions.get_shape().as_list()))
+                # print("label_ids shape: " + str(label_ids.get_shape().as_list()))
+                # print("is_real_example shape: " + str(is_real_example.get_shape().as_list()))
+                precision = tf_metrics.precision(label_ids,predictions,9,[2,3,4,5], average="macro")
+                recall = tf_metrics.recall(label_ids,predictions,9,[2,3,4,5], average="macro")
+                f = tf_metrics.f1(label_ids,predictions,9,[2,3,4,5], average="macro")
+
+                # precision = tf_metrics.precision(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
+                # recall = tf_metrics.recall(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
+                # f = tf_metrics.f1(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
                 #
                 return {
                     "eval_precision":precision,
@@ -643,7 +668,7 @@ def main(_):
 
     model_fn = model_fn_builder(
         bert_config=bert_config,
-        num_labels=len(label_list)+1,  # why?
+        num_labels=len(label_list)+1,  # why? label id starts from 1
         init_checkpoint=FLAGS.init_checkpoint,
         learning_rate=FLAGS.learning_rate,
         num_train_steps=num_train_steps,
