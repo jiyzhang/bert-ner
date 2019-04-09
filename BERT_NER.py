@@ -219,8 +219,10 @@ class DataProcessor(object):
         """Reads sents and tags from "input_prefix".words.txt and "input_prefix".tags.txt """
         """分隔符为 "|" """
 
-        sent_file = os.path.join(data_dir, input_prefix + "words.txt")
-        tags_file = os.path.join(data_dir, input_prefix + "tags.txt" )
+        sent_file = os.path.join(data_dir, input_prefix + ".words.txt")
+        tags_file = os.path.join(data_dir, input_prefix + ".tags.txt" )
+
+        print("sent file: {}, tag file: {}".format(sent_file, tags_file))
 
         lines = []
         with tf.gfile.Open(sent_file) as f_sent, tf.gfile.Open(tags_file) as f_tags:
