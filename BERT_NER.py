@@ -178,7 +178,7 @@ class DataProcessor(object):
         """Gets the list of labels for this data set."""
         raise NotImplementedError()
 
-    @classmethod
+    #@classmethod
     # def _read_data(cls, input_file):
     #     """Reads a BIO data."""
     #     """
