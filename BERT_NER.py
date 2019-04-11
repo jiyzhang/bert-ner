@@ -90,7 +90,7 @@ flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
 
 flags.DEFINE_bool("do_predict", False,"Whether to run the model in inference mode on the test set.")
 
-flags.DEFINE_integer("train_batch_size", 128, "Total batch size for training.") # 32 -> 128
+flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
 
 flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
 
@@ -305,10 +305,11 @@ def convert_single_example(ex_index, example, label_map, max_seq_length, tokeniz
         for m in range(len(token)):
             if m == 0:
                 labels.append(label_1)
-            else:
+            else: # 中文不会出现
                 labels.append("X")
         # print(tokens, labels)
     # tokens = tokenizer.tokenize(example.text)
+    #[CLS][max_seq_length - 2 ][SEP]
     if len(tokens) >= max_seq_length - 1:
         # Account for [CLS] and [SEP] with "- 2"
         tokens = tokens[0:(max_seq_length - 2)]
@@ -392,7 +393,8 @@ def filed_based_convert_examples_to_features(
         if ex_index % 5000 == 0:
             tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
         ### skip sentences whose length is great than max_seq_len(256)
-        if (not isinstance(example, PaddingInputExample)) and len(example.text) >= 256:
+        ### 需要处理，很多句子会被skip
+        if (not isinstance(example, PaddingInputExample)) and len(example.text) >= FLAGS.max_seq_length:
             continue
 
         feature = convert_single_example(ex_index, example, label_map, max_seq_length, tokenizer,mode)
@@ -495,7 +497,7 @@ def create_model(bert_config, is_training, input_ids, input_mask,
         output_layer = tf.reshape(output_layer, [-1, hidden_size])
         logits = tf.matmul(output_layer, output_weight, transpose_b=True)
         logits = tf.nn.bias_add(logits, output_bias)
-        logits = tf.reshape(logits, [-1, FLAGS.max_seq_length, 9]) # 9 is num_tags
+        logits = tf.reshape(logits, [-1, FLAGS.max_seq_length, num_labels]) # 9 is num_tags
         # mask = tf.cast(input_mask,tf.float32)
         # loss = tf.contrib.seq2seq.sequence_loss(logits,labels,mask)
         # return (loss, logits, predict)
@@ -644,11 +646,17 @@ def main(_):
     label_list = processor.get_labels()
 
     tokenizer = tokenization.FullTokenizer(
-        vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
+        vocab_file=FLAGS.vocab_file,
+        do_lower_case=FLAGS.do_lower_case
+    )
+
     tpu_cluster_resolver = None
     if FLAGS.use_tpu and FLAGS.tpu_name:
         tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-            FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
+            FLAGS.tpu_name,
+            zone=FLAGS.tpu_zone,
+            project=FLAGS.gcp_project
+        )
 
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
 
@@ -695,7 +703,12 @@ def main(_):
     if FLAGS.do_train:
         train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
         filed_based_convert_examples_to_features(
-            train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
+            train_examples,
+            label_list,
+            FLAGS.max_seq_length,
+            tokenizer,
+            train_file)
+
         tf.logging.info("***** Running training *****")
         tf.logging.info("  Num examples = %d", len(train_examples))
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
@@ -705,6 +718,7 @@ def main(_):
             seq_length=FLAGS.max_seq_length,
             is_training=True,
             drop_remainder=True)
+
         estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
     if FLAGS.do_eval:
@@ -723,11 +737,7 @@ def main(_):
         filed_based_convert_examples_to_features(
             eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
 
-        tf.logging.info("***** Running evaluation *****")
-        tf.logging.info("  Num examples = %d (%d actual, %d padding)",
-                        len(eval_examples), num_actual_eval_examples,
-                        len(eval_examples) - num_actual_eval_examples)
-        tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+
 
         # This tells the estimator to run through the entire set.
         eval_steps = None
@@ -737,7 +747,21 @@ def main(_):
             assert len(eval_examples) % FLAGS.eval_batch_size == 0
             eval_steps = int(len(eval_examples) / FLAGS.eval_batch_size)
 
-        eval_drop_remainder = True if FLAGS.use_tpu else False
+        #eval_drop_remainder = True if FLAGS.use_tpu else False
+        eval_drop_remainder = False
+
+        tf.logging.info("***** Running evaluation *****")
+        tf.logging.info("  Num examples = %d (%d actual, %d padding)",
+                        len(eval_examples), num_actual_eval_examples,
+                        len(eval_examples) - num_actual_eval_examples)
+        tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+        if eval_steps is None:
+            tf.logging.info("  eval_steps: None")
+        else:
+            tf.logging.info("  eval_steps = %d", eval_steps)
+
+        tf.logging.info("  eval_drop_remainder = %d:", int(eval_drop_remainder))
+
         eval_input_fn = file_based_input_fn_builder(
             input_file=eval_file,
             seq_length=FLAGS.max_seq_length,
