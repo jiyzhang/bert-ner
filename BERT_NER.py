@@ -737,7 +737,11 @@ def main(_):
         filed_based_convert_examples_to_features(
             eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
 
-
+        tf.logging.info("***** Running evaluation *****")
+        tf.logging.info("  Num examples = %d (%d actual, %d padding)",
+                        len(eval_examples), num_actual_eval_examples,
+                        len(eval_examples) - num_actual_eval_examples)
+        tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
 
         # This tells the estimator to run through the entire set.
         eval_steps = None
@@ -747,20 +751,15 @@ def main(_):
             assert len(eval_examples) % FLAGS.eval_batch_size == 0
             eval_steps = int(len(eval_examples) / FLAGS.eval_batch_size)
 
-        #eval_drop_remainder = True if FLAGS.use_tpu else False
-        eval_drop_remainder = False
+        eval_drop_remainder = True if FLAGS.use_tpu else False
+        #eval_drop_remainder = False
 
-        tf.logging.info("***** Running evaluation *****")
-        tf.logging.info("  Num examples = %d (%d actual, %d padding)",
-                        len(eval_examples), num_actual_eval_examples,
-                        len(eval_examples) - num_actual_eval_examples)
-        tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
         if eval_steps is None:
             tf.logging.info("  eval_steps: None")
         else:
             tf.logging.info("  eval_steps = %d", eval_steps)
 
-        tf.logging.info("  eval_drop_remainder = %d:", int(eval_drop_remainder))
+        tf.logging.info("  eval_drop_remainder = %d", int(eval_drop_remainder))
 
         eval_input_fn = file_based_input_fn_builder(
             input_file=eval_file,
@@ -768,7 +767,10 @@ def main(_):
             is_training=False,
             drop_remainder=eval_drop_remainder)
 
-        result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
+        try:
+            result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
+        except tf.errors.OutOfRangeError:
+            tf.logging.info("Out Of Range error catpured")
 
         output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
         with tf.gfile.GFile(output_eval_file, "w") as writer:
