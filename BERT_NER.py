@@ -118,6 +118,9 @@ flags.DEFINE_integer(
     "num_tpu_cores", 8,
     "Only used if `use_tpu` is True. Total number of TPU cores to use.")
 
+### for dataset format difference
+flags.DEFINE_string("datasetformat", 'wind', "dataset format, conll or wind")
+
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
 
@@ -178,46 +181,45 @@ class DataProcessor(object):
         """Gets the list of labels for this data set."""
         raise NotImplementedError()
 
-    #@classmethod
-    # def _read_data(cls, input_file):
-    #     """Reads a BIO data."""
-    #     """
-    #     每行一个字，一个lable
-    #     字 label
-    #
-    #     遇到空行，认为一个句子结束
-    #
-    #     输出:
-    #     [[O O B-LOC I-LOC B-LOC I-LOC I-LOC,我 爱 北 京 天 安 门],  句子2，句子3.....]
-    #     """
-    #     with tf.gfile.Open(input_file) as f:
-    #         lines = []
-    #         words = []
-    #         labels = []
-    #         for line in f:
-    #             contends = line.strip()
-    #             word = line.strip().split(' ')[0]
-    #             label = line.strip().split(' ')[-1]
-    #             if contends.startswith("-DOCSTART-"):
-    #                 words.append('')
-    #                 continue
-    #             # if len(contends) == 0 and words[-1] == '。':
-    #             # blank line, means the end of a sentence, the previous word is "。"q
-    #             if len(contends) == 0:
-    #                 l = ' '.join([label for label in labels if len(label) > 0])
-    #                 w = ' '.join([word for word in words if len(word) > 0])
-    #                 lines.append([l, w])
-    #                 words = []
-    #                 labels = []
-    #                 continue
-    #             words.append(word)
-    #             labels.append(label)
-    #         return lines
+    @classmethod
+    def _read_data_conll(cls, input_file):
+        """Reads a BIO data."""
+        """
+        每行一个字，一个lable
+        字 label
+
+        遇到空行，认为一个句子结束
+
+        输出:
+        [[O O B-LOC I-LOC B-LOC I-LOC I-LOC,我 爱 北 京 天 安 门],  句子2，句子3.....]
+        """
+        with tf.gfile.Open(input_file) as f:
+            lines = []
+            words = []
+            labels = []
+            for line in f:
+                contends = line.strip()
+                word = line.strip().split(' ')[0]
+                label = line.strip().split(' ')[-1]
+                if contends.startswith("-DOCSTART-"):
+                    words.append('')
+                    continue
+                # if len(contends) == 0 and words[-1] == '。':
+                # blank line, means the end of a sentence, the previous word is "。"q
+                if len(contends) == 0:
+                    l = ' '.join([label for label in labels if len(label) > 0])
+                    w = ' '.join([word for word in words if len(word) > 0])
+                    lines.append([l, w])
+                    words = []
+                    labels = []
+                    continue
+                words.append(word)
+                labels.append(label)
+            return lines
 
     @classmethod
-    def _read_data(cls, data_dir, input_prefix, seperator = '|'):
+    def _read_data(cls, data_dir, input_prefix):
         """Reads sents and tags from "input_prefix".words.txt and "input_prefix".tags.txt """
-        """分隔符为 "|" """
 
         sent_file = os.path.join(data_dir, input_prefix + ".words.txt")
         tags_file = os.path.join(data_dir, input_prefix + ".tags.txt" )
@@ -234,24 +236,39 @@ class DataProcessor(object):
 
 class NerProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
-        return self._create_example(
-            self._read_data(data_dir, "train"), "train"
-        )
+        if FLAGS.datasetformat == "conll":
+            return self._create_example(
+                self._read_data_conll(os.path.join(data_dir, "train.txt")), "train"
+            )
+        else: # wind
+            return self._create_example(
+                self._read_data(data_dir, "train"), "train")
 
     def get_dev_examples(self, data_dir):
-        return self._create_example(
-            self._read_data(data_dir, "valid"), "dev"
-        )
+        if FLAGS.datasetformat == "conll":
+            return self._create_example(
+                self._read_data_conll(os.path.join(data_dir, "dev.txt")), "dev"
+            )
+        else:
+            return self._create_example(
+                self._read_data(data_dir, "valid"), "dev"
+            )
 
     def get_test_examples(self,data_dir):
-        return self._create_example(
-            self._read_data(data_dir, "test"), "test"
-        )
-
+        if FLAGS.datasetformat == "conll":
+            return self._create_example(
+                self._read_data_conll(os.path.join(data_dir, "test.txt")), "test"
+            )
+        else:
+            return self._create_example(
+                self._read_data(data_dir, "test"), "test"
+            )
 
     def get_labels(self):
-        #return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "X", "[CLS]", "[SEP]"]
-        return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "X", "[CLS]", "[SEP]"]
+        if FLAGS.datasetformat == "conll":
+            return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "X", "[CLS]", "[SEP]"]
+        else:
+            return ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "X", "[CLS]", "[SEP]"]
 
     def _create_example(self, lines, set_type):
         examples = []
@@ -263,15 +280,19 @@ class NerProcessor(DataProcessor):
         return examples
 
 
-# def write_tokens(tokens,mode):
-#     if mode=="test":
-#         path = os.path.join(FLAGS.output_dir, "token_"+mode+".txt")
-#         wf = tf.gfile.Open(path,'a')
-#         for token in tokens:
-#             if token!="**NULL**":
-#                 wf.write(token+'\n')
-#         wf.close()
-
+def write_tokens(tokens,mode):
+    if mode=="test":
+        path = os.path.join(FLAGS.output_dir, "token_"+mode+".txt")
+        openmode = ""
+        if tf.gfile.Exists(path):
+            openmode = 'a'
+        else:
+            openmode = 'w'
+        wf = tf.gfile.Open(path, openmode)
+        for token in tokens:
+            if token!="**NULL**":
+                wf.write(token+'\n')
+        wf.close()
 
 """
  label_map = {}
@@ -290,6 +311,11 @@ def convert_single_example(ex_index, example, label_map, max_seq_length, tokeniz
             segment_ids=[0] * max_seq_length,
             label_ids=[0] * max_seq_length, #label_ids=0,
             is_real_example=False)
+
+    if FLAGS.datasetformat == "wind":
+        seperator = '|'
+    else:
+        seperator = ' '
 
     textlist = example.text.split(seperator)
     labellist = example.label.split(seperator)
@@ -372,7 +398,8 @@ def convert_single_example(ex_index, example, label_map, max_seq_length, tokeniz
         is_real_example=True
         #label_mask = label_mask
     )
-    # write_tokens(ntokens,mode) ## what stored in the file?
+
+    write_tokens(ntokens,mode) ## what stored in the file?
     return feature
 
 
@@ -450,17 +477,21 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
         d = tf.data.TFRecordDataset(input_file)
         if is_training:
             d = d.repeat()
-            d = d.shuffle(buffer_size=100)
+            d = d.shuffle(buffer_size=300)
 
         # map_and_batch (from tensorflow.contrib.data.python.ops.batching) is deprecated and will be removed in a future version.
         # Instructions for updating:
         # Use `tf.data.experimental.map_and_batch(...)`.
 
         d = d.apply(
-            tf.contrib.data.map_and_batch(
+            #tf.contrib.data.map_and_batch(
+            tf.data.experimental.map_and_batch(
                 lambda record: _decode_record(record, name_to_features),
                 batch_size=batch_size,
                 drop_remainder=drop_remainder))
+        # ensure that a batch of data is pre-loaded on the computing device so that it doesn't suffer from
+        # data starvation
+        d= d.prefetch(buffer_size= 4)
 
         return d
 
@@ -585,9 +616,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 # print("predictions shape: " + str(predictions.get_shape().as_list()))
                 # print("label_ids shape: " + str(label_ids.get_shape().as_list()))
                 # print("is_real_example shape: " + str(is_real_example.get_shape().as_list()))
-                precision = tf_metrics.precision(label_ids,predictions,9,[2,3,4,5], average="macro")
-                recall = tf_metrics.recall(label_ids,predictions,9,[2,3,4,5], average="macro")
-                f = tf_metrics.f1(label_ids,predictions,9,[2,3,4,5], average="macro")
+                precision = tf_metrics.precision(label_ids,predictions,num_labels,[2,3,4,5], average="macro")
+                recall = tf_metrics.recall(label_ids,predictions,num_labels,[2,3,4,5], average="macro")
+                f = tf_metrics.f1(label_ids,predictions,num_labels,[2,3,4,5], average="macro")
 
                 # precision = tf_metrics.precision(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
                 # recall = tf_metrics.recall(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
