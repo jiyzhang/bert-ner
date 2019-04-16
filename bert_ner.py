@@ -7,17 +7,13 @@ BASED ON Google_BERT.
 Adjust code for chinese ner
 """
 
-import logging
-from pathlib import Path
 import collections
 import os
 from bert import modeling
 from bert import optimization
 from bert import tokenization
 import tensorflow as tf
-tf.enable_eager_execution()
-# from sklearn.metrics import f1_score,precision_score,recall_score
-# from tensorflow.python.ops import math_ops
+
 import tf_metrics
 import pickle
 
@@ -458,18 +454,20 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
 
     def _decode_record(record, name_to_features):
         """Decodes a record to a TensorFlow example."""
-
         example = tf.parse_single_example(record, name_to_features)
+
+        # tf.Example only supports tf.int64, but the TPU only supports tf.int32.
+        # So cast all int64 to int32.
         for name in list(example.keys()):
             t = example[name]
             if t.dtype == tf.int64:
                 t = tf.to_int32(t)
             example[name] = t
+
         return example
 
     def input_fn(params):
         """The actual input function."""
-
         batch_size = params["batch_size"]
 
         # For training, we want a lot of parallel reading and shuffling.
@@ -489,9 +487,6 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
                 lambda record: _decode_record(record, name_to_features),
                 batch_size=batch_size,
                 drop_remainder=drop_remainder))
-        # ensure that a batch of data is pre-loaded on the computing device so that it doesn't suffer from
-        # data starvation
-        d= d.prefetch(buffer_size= 4)
 
         return d
 
@@ -525,23 +520,45 @@ def create_model(bert_config, is_training, input_ids, input_mask,
         if is_training:
             # Please use `rate` instead of `keep_prob`. Rate should be set to `rate = 1 - keep_prob`.
             output_layer = tf.nn.dropout(output_layer, rate = 0.1) #keep_prob=0.9)
-        output_layer = tf.reshape(output_layer, [-1, hidden_size])
+
+        # output_layer = tf.reshape(output_layer, [-1, hidden_size])
         logits = tf.matmul(output_layer, output_weight, transpose_b=True)
         logits = tf.nn.bias_add(logits, output_bias)
-        logits = tf.reshape(logits, [-1, FLAGS.max_seq_length, num_labels]) # 9 is num_tags
-        # mask = tf.cast(input_mask,tf.float32)
-        # loss = tf.contrib.seq2seq.sequence_loss(logits,labels,mask)
-        # return (loss, logits, predict)
-        ##########################################################################
+
+        # probabilities = tf.nn.softmax(logits, axis=-1)
         log_probs = tf.nn.log_softmax(logits, axis=-1)
-        # num_labels, 比实际的label数量多1，因为从1开始计数
+
         one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+
         per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-        loss = tf.reduce_sum(per_example_loss)
-        probabilities = tf.nn.softmax(logits, axis=-1)
-        predict = tf.argmax(probabilities,axis=-1)
-        return (loss, per_example_loss, logits,predict)
-        ##########################################################################
+        loss = tf.reduce_mean(per_example_loss)
+
+        predict_ids = tf.argmax(logits, axis=-1)
+
+        return (loss, per_example_loss, logits, predict_ids)
+
+
+        # logits = tf.reshape(logits, [-1, FLAGS.max_seq_length, num_labels]) # 9 is num_tags
+        # # mask = tf.cast(input_mask,tf.float32)
+        # # loss = tf.contrib.seq2seq.sequence_loss(logits,labels,mask)
+        # # return (loss, logits, predict)
+        # ##########################################################################
+        # log_probs = tf.nn.log_softmax(logits, axis=-1)
+        # # num_labels, 比实际的label数量多1，因为从1开始计数
+        # # labels: 即 label_ids = features["label_ids"]
+        # # shape: [ batch_size, max_seq_len]
+        # one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+        # # one_hot_labels.shape [batch_size, max_seq_len, num_labels]
+        # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
+        # # per_example_loss.shape [batch_size, max_seq_len]
+        # loss = tf.reduce_sum(per_example_loss)
+        # # loss: scalar
+        # probabilities = tf.nn.softmax(logits, axis=-1)
+        # # probabilities： [batch_size, max_seq_len, num_labels]
+        # predict = tf.argmax(probabilities,axis=-1)
+        # #predict: [batch_size, max_seq_len]
+        # return (loss, per_example_loss, logits,predict)
+        # ##########################################################################
         
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
@@ -571,7 +588,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         #label_mask = features["label_mask"]
         is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-        (total_loss,  per_example_loss,logits,predicts) = create_model(
+        (total_loss,  per_example_loss,logits,predit_ids) = create_model(
             bert_config, is_training, input_ids, input_mask,segment_ids, label_ids,
             num_labels, use_one_hot_embeddings)
 
@@ -620,6 +637,10 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 recall = tf_metrics.recall(label_ids,predictions,num_labels,[2,3,4,5], average="macro")
                 f = tf_metrics.f1(label_ids,predictions,num_labels,[2,3,4,5], average="macro")
 
+                accuracy = tf.metrics.accuracy(
+                    labels=label_ids, predictions=predictions, weights=is_real_example)
+                loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
+
                 # precision = tf_metrics.precision(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
                 # recall = tf_metrics.recall(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
                 # f = tf_metrics.f1(label_ids, predictions, 11, [2, 3, 4, 5, 6, 7], average="macro")
@@ -628,7 +649,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                     "eval_precision":precision,
                     "eval_recall":recall,
                     "eval_f": f,
-                    #"eval_loss": loss,
+                    "eval_accuracy": accuracy,
+                    "eval_loss": loss,
                 }
             eval_metrics = (metric_fn, [per_example_loss, label_ids, logits, is_real_example])
             # eval_metrics = (metric_fn, [label_ids, logits])
@@ -640,7 +662,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         else:
             output_spec = tf.contrib.tpu.TPUEstimatorSpec(
                 mode = mode,
-                predictions={"probabilities":predicts},
+                predictions={"predictions":predit_ids},
                 scaffold_fn=scaffold_fn)
         return output_spec
     return model_fn
@@ -851,7 +873,7 @@ def main(_):
         # needs to confirm
         with tf.gfile.GFile(output_predict_file,'w') as writer:
             for prediction in result:
-                predict = prediction["probabilities"]
+                predict = prediction["predictions"]
                 output_line = "\n".join(id2label[id] for id in predict if id!=0) + "\n"
                 writer.write(output_line)
 
