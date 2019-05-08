@@ -530,7 +530,7 @@ def create_model_old(bert_config, is_training, input_ids, input_mask,
             # Please use `rate` instead of `keep_prob`. Rate should be set to `rate = 1 - keep_prob`.
             output_layer = tf.nn.dropout(output_layer, rate = 0.1) #keep_prob=0.9)
 
-        # output_layer = tf.reshape(output_layer, [-1, hidden_size])
+        output_layer = tf.reshape(output_layer, [-1, hidden_size])
         logits = tf.matmul(output_layer, output_weight, transpose_b=True)
         logits = tf.nn.bias_add(logits, output_bias)
 
